@@ -5,9 +5,9 @@ services:
     buildCommand: npm install
     startCommand: node index.js
     envVars:
-      - key: API_ID
+      - key: API_IDS
         sync: false
-      - key: API_HASH
+      - key: API_HASHES
         sync: false
       - key: STRING_SESSIONS
         sync: false

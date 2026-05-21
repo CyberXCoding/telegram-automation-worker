@@ -6,8 +6,11 @@ const { Logger } = require("telegram/extensions/Logger");
 // Configuration
 // ──────────────────────────────────────────────
 
-const API_ID = parseInt(process.env.API_ID, 10);
-const API_HASH = process.env.API_HASH;
+// Support per-session API credentials
+// Format: API_IDS=id1|id2|id3  API_HASHES=hash1|hash2|hash3  STRING_SESSIONS=sess1|sess2|sess3
+// If only one API_ID/API_HASH is provided, it's used for all sessions.
+const API_IDS = (process.env.API_IDS || "").split("|").filter(Boolean).map(Number);
+const API_HASHES = (process.env.API_HASHES || "").split("|").filter(Boolean);
 const STRING_SESSIONS = (process.env.STRING_SESSIONS || "").split("|").filter(Boolean);
 const TARGET_BOTS = (process.env.TARGET_BOTS || "").split("|").filter(Boolean);
 const LOOP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -20,10 +23,21 @@ const FLOOD_WAIT_MULTIPLIER = 1000; // convert seconds to ms
 
 function validateConfig() {
   const errors = [];
-  if (!API_ID || isNaN(API_ID)) errors.push("API_ID is missing or invalid");
-  if (!API_HASH) errors.push("API_HASH is missing");
+
+  if (API_IDS.length === 0) errors.push("API_IDS is empty");
+  if (API_HASHES.length === 0) errors.push("API_HASHES is empty");
   if (STRING_SESSIONS.length === 0) errors.push("STRING_SESSIONS is empty");
   if (TARGET_BOTS.length === 0) errors.push("TARGET_BOTS is empty");
+
+  // If multiple API_IDs/HASHes, count must match sessions
+  if (API_IDS.length > 1 && API_IDS.length !== STRING_SESSIONS.length) {
+    errors.push(`API_IDS count (${API_IDS.length}) doesn't match STRING_SESSIONS count (${STRING_SESSIONS.length})`);
+  }
+  if (API_HASHES.length > 1 && API_HASHES.length !== STRING_SESSIONS.length) {
+    errors.push(`API_HASHES count (${API_HASHES.length}) doesn't match STRING_SESSIONS count (${STRING_SESSIONS.length})`);
+  }
+  // Validate API_IDS are valid numbers
+  if (API_IDS.some(isNaN)) errors.push("API_IDS contains invalid numbers");
 
   if (errors.length > 0) {
     console.error("❌ Configuration errors:");
@@ -37,12 +51,22 @@ function validateConfig() {
 }
 
 // ──────────────────────────────────────────────
+// Resolve API credentials for a session index
+// ──────────────────────────────────────────────
+
+function getApiCredentials(index) {
+  // If only one value, reuse for all sessions
+  const apiId = API_IDS.length === 1 ? API_IDS[0] : API_IDS[index];
+  const apiHash = API_HASHES.length === 1 ? API_HASHES[0] : API_HASHES[index];
+  return { apiId, apiHash };
+}
+
+// ──────────────────────────────────────────────
 // Logger helper — suppress verbose GramJS logs
 // ──────────────────────────────────────────────
 
 class CustomLogger extends Logger {
   info(msg) {
-    // only surface important messages
     if (typeof msg === "string" && msg.length < 200) {
       console.log(`[GramJS] ${msg}`);
     }
@@ -85,7 +109,7 @@ async function sendStartCommands(client, sessionLabel) {
 // Error handling
 // ──────────────────────────────────────────────
 
-function handleError(err, sessionLabel, bot) {
+async function handleError(err, sessionLabel, bot) {
   const msg = err?.errorMessage || err?.message || String(err);
 
   // FloodWait
@@ -94,7 +118,8 @@ function handleError(err, sessionLabel, bot) {
     console.warn(
       `[${sessionLabel}] ⏳ FloodWait ${seconds}s on @${bot} — sleeping…`
     );
-    return sleep(seconds * FLOOD_WAIT_MULTIPLIER);
+    await sleep(seconds * FLOOD_WAIT_MULTIPLIER);
+    return "FLOOD_WAIT";
   }
 
   // Auth key error — session is dead
@@ -115,11 +140,14 @@ function handleError(err, sessionLabel, bot) {
 
 async function runSession(sessionString, index) {
   const label = `Session-${index + 1}`;
+  const { apiId, apiHash } = getApiCredentials(index);
   const stringSession = new StringSession(sessionString);
   let dead = false;
 
+  console.log(`[${label}] Using API_ID=${apiId}`);
+
   while (!dead) {
-    const client = new TelegramClient(stringSession, API_ID, API_HASH, {
+    const client = new TelegramClient(stringSession, apiId, apiHash, {
       connectionRetries: 10,
       retryDelay: 5000,
       autoReconnect: true,
