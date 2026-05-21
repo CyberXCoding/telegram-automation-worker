@@ -1,0 +1,22 @@
+{
+  "name": "telegram-automation-worker",
+  "version": "1.0.0",
+  "description": "Telegram automation worker using GramJS — sends /start to target bots on a recurring schedule",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "telegram": "^2.25.26"
+  },
+  "keywords": [
+    "telegram",
+    "gramjs",
+    "automation",
+    "worker"
+  ],
+  "license": "MIT"
+}

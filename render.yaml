@@ -1,0 +1,16 @@
+services:
+  - type: worker
+    name: telegram-automation
+    runtime: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: STRING_SESSIONS
+        sync: false
+      - key: TARGET_BOTS
+        sync: false
+    plan: free
