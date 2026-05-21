@@ -1,0 +1,34 @@
+name: Telegram Automation - Hourly Cron
+
+on:
+  schedule:
+    # Runs every hour at minute 0 (UTC)
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    # Allow manual trigger from GitHub UI
+
+jobs:
+  send-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run automation (single cycle)
+        env:
+          API_IDS: ${{ secrets.API_IDS }}
+          API_HASHES: ${{ secrets.API_HASHES }}
+          STRING_SESSIONS: ${{ secrets.STRING_SESSIONS }}
+          TARGET_BOTS: ${{ secrets.TARGET_BOTS }}
+          SINGLE_RUN: "true"
+        run: node index.js

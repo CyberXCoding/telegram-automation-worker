@@ -13,6 +13,7 @@ const API_IDS = (process.env.API_IDS || "").split("|").filter(Boolean).map(Numbe
 const API_HASHES = (process.env.API_HASHES || "").split("|").filter(Boolean);
 const STRING_SESSIONS = (process.env.STRING_SESSIONS || "").split("|").filter(Boolean);
 const TARGET_BOTS = (process.env.TARGET_BOTS || "").split("|").filter(Boolean);
+const SINGLE_RUN = (process.env.SINGLE_RUN || "").toLowerCase() === "true";
 const LOOP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const START_COMMAND_DELAY_MS = 3000; // 3-second gap between the two /start messages
 const FLOOD_WAIT_MULTIPLIER = 1000; // convert seconds to ms
@@ -46,8 +47,9 @@ function validateConfig() {
   }
 
   console.log("✅ Configuration validated");
-  console.log(`   Sessions : ${STRING_SESSIONS.length}`);
-  console.log(`   Bots     : ${TARGET_BOTS.length}`);
+  console.log(`   Sessions   : ${STRING_SESSIONS.length}`);
+  console.log(`   Bots       : ${TARGET_BOTS.length}`);
+  console.log(`   Mode       : ${SINGLE_RUN ? "SINGLE_RUN (cron)" : "CONTINUOUS (worker)"}`);
 }
 
 // ──────────────────────────────────────────────
@@ -135,10 +137,60 @@ async function handleError(err, sessionLabel, bot) {
 }
 
 // ──────────────────────────────────────────────
-// Run one session continuously
+// Single-run mode: connect → send → disconnect → exit
+// Used by GitHub Actions cron
 // ──────────────────────────────────────────────
 
-async function runSession(sessionString, index) {
+async function runSessionOnce(sessionString, index) {
+  const label = `Session-${index + 1}`;
+  const { apiId, apiHash } = getApiCredentials(index);
+  const stringSession = new StringSession(sessionString);
+
+  console.log(`[${label}] Using API_ID=${apiId}`);
+
+  const client = new TelegramClient(stringSession, apiId, apiHash, {
+    connectionRetries: 5,
+    retryDelay: 5000,
+    autoReconnect: false,
+    timeout: 30000,
+    logger: new CustomLogger(),
+  });
+
+  try {
+    console.log(`[${label}] 🔌 Connecting…`);
+    await client.connect();
+
+    if (!client.connected) {
+      throw new Error("Failed to connect");
+    }
+
+    const me = await client.getMe().catch(() => null);
+    if (me) {
+      console.log(`[${label}] ✅ Connected as ${me.firstName} (ID: ${me.id})`);
+    } else {
+      console.log(`[${label}] ✅ Connected`);
+    }
+
+    console.log(`[${label}] 🚀 Running /start cycle — ${new Date().toISOString()}`);
+    await sendStartCommands(client, label);
+    console.log(`[${label}] ✅ Cycle complete`);
+  } catch (err) {
+    const msg = err?.errorMessage || err?.message || String(err);
+    console.error(`[${label}] ❌ Error: ${msg}`);
+  } finally {
+    try {
+      await client.disconnect();
+    } catch (_) {}
+    console.log(`[${label}] 🔌 Disconnected`);
+  }
+}
+
+// ──────────────────────────────────────────────
+// Continuous mode: connect → loop forever → reconnect
+// Used by Render / always-on hosting
+// ──────────────────────────────────────────────
+
+async function runSessionContinuous(sessionString, index) {
   const label = `Session-${index + 1}`;
   const { apiId, apiHash } = getApiCredentials(index);
   const stringSession = new StringSession(sessionString);
@@ -165,14 +217,11 @@ async function runSession(sessionString, index) {
 
       const me = await client.getMe().catch(() => null);
       if (me) {
-        console.log(
-          `[${label}] ✅ Connected as ${me.firstName} (ID: ${me.id})`
-        );
+        console.log(`[${label}] ✅ Connected as ${me.firstName} (ID: ${me.id})`);
       } else {
-        console.log(`[${label}] ✅ Connected (could not fetch user info)`);
+        console.log(`[${label}] ✅ Connected`);
       }
 
-      // Main loop
       while (!dead) {
         console.log(`[${label}] 🚀 Starting /start cycle — ${new Date().toISOString()}`);
         const result = await sendStartCommands(client, label);
@@ -182,9 +231,7 @@ async function runSession(sessionString, index) {
           break;
         }
 
-        console.log(
-          `[${label}] 😴 Sleeping ${LOOP_INTERVAL_MS / 1000}s until next cycle…`
-        );
+        console.log(`[${label}] 😴 Sleeping ${LOOP_INTERVAL_MS / 1000}s until next cycle…`);
         await sleep(LOOP_INTERVAL_MS);
       }
     } catch (err) {
@@ -202,9 +249,7 @@ async function runSession(sessionString, index) {
     } finally {
       try {
         await client.disconnect();
-      } catch (_) {
-        // ignore
-      }
+      } catch (_) {}
     }
   }
 
@@ -225,25 +270,38 @@ function sleep(ms) {
 
 async function main() {
   console.log("═══════════════════════════════════════════");
-  console.log("  Telegram Automation Worker — Started");
+  console.log(`  Telegram Automation Worker — ${SINGLE_RUN ? "Cron Mode" : "Continuous Mode"}`);
   console.log("═══════════════════════════════════════════");
 
   validateConfig();
 
-  // Launch all sessions in parallel — each runs its own infinite loop
-  const promises = STRING_SESSIONS.map((session, i) => runSession(session, i));
+  if (SINGLE_RUN) {
+    // ── Cron / GitHub Actions mode ──
+    // Run once for all sessions, then exit
+    const promises = STRING_SESSIONS.map((session, i) => runSessionOnce(session, i));
+    const results = await Promise.allSettled(promises);
 
-  // If any session throws unexpectedly, we still keep the others alive
-  const results = await Promise.allSettled(promises);
+    results.forEach((r, i) => {
+      if (r.status === "rejected") {
+        console.error(`[Session-${i + 1}] Unexpected exit:`, r.reason);
+      }
+    });
 
-  // Log final state
-  results.forEach((r, i) => {
-    if (r.status === "rejected") {
-      console.error(`[Session-${i + 1}] Unexpected exit:`, r.reason);
-    }
-  });
+    console.log("✅ Single run complete. Exiting.");
+  } else {
+    // ── Continuous / Worker mode ──
+    // Each session runs in its own infinite loop
+    const promises = STRING_SESSIONS.map((session, i) => runSessionContinuous(session, i));
+    const results = await Promise.allSettled(promises);
 
-  console.log("All sessions have ended. Process exiting.");
+    results.forEach((r, i) => {
+      if (r.status === "rejected") {
+        console.error(`[Session-${i + 1}] Unexpected exit:`, r.reason);
+      }
+    });
+
+    console.log("All sessions have ended. Process exiting.");
+  }
 }
 
 main().catch((err) => {
