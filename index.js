@@ -22,22 +22,22 @@ const FLOOD_WAIT_MULTIPLIER = 1000;
 
 const SAFETY = {
   // Delay between the two /start messages to the same bot
-  START_CMD_MIN_MS: 4000,     // 4 seconds minimum
-  START_CMD_MAX_MS: 8000,     // 8 seconds maximum
+  START_CMD_MIN_MS: 3000,     // 3 seconds minimum
+  START_CMD_MAX_MS: 6000,     // 6 seconds maximum
 
   // Delay between switching to a different bot
-  BETWEEN_BOT_MIN_MS: 6000,   // 6 seconds minimum
-  BETWEEN_BOT_MAX_MS: 12000,  // 12 seconds maximum
+  BETWEEN_BOT_MIN_MS: 4000,   // 4 seconds minimum
+  BETWEEN_BOT_MAX_MS: 8000,   // 8 seconds maximum
 
   // Stagger delay before each session starts (so all 3 don't start together)
-  SESSION_STAGGER_MIN_MS: 5000,   // 5 seconds
-  SESSION_STAGGER_MAX_MS: 20000,  // 20 seconds
+  SESSION_STAGGER_MIN_MS: 2000,   // 2 seconds
+  SESSION_STAGGER_MAX_MS: 8000,   // 8 seconds
 
   // Max consecutive messages before taking a break
-  MAX_MESSAGES_BEFORE_BREAK: 4,
+  MAX_MESSAGES_BEFORE_BREAK: 6,
   // Break duration after MAX_MESSAGES_BEFORE_BREAK
-  BREAK_MIN_MS: 15000,   // 15 seconds
-  BREAK_MAX_MS: 30000,   // 30 seconds
+  BREAK_MIN_MS: 8000,    // 8 seconds
+  BREAK_MAX_MS: 15000,   // 15 seconds
 
   // Add random jitter to loop interval (±5 min)
   LOOP_JITTER_MIN_MS: -300000,  // -5 minutes
